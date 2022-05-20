@@ -2,7 +2,7 @@ use rustc_index::newtype_index;
 use rustc_index::vec::IndexVec;
 use rustc_middle::mir::{BasicBlock, Field, Local};
 use rustc_span::def_id::DefPathHash;
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 
 // Implement `Idx` and other traits like MIR indices (`Local`, `BasicBlock`, etc.)
 newtype_index!(
@@ -22,6 +22,7 @@ newtype_index!(
 pub const ROOT_NODE: NodeId = NodeId::from_u32(0);
 
 /// A pointer derivation graph, which tracks the handling of one object throughout its lifetime.
+#[derive(Debug)]
 pub struct Graph {
     /// The nodes in the graph.  Nodes are stored in increasing order by timestamp.  The first
     /// node, called the "root node", creates the object described by this graph, and all other
@@ -44,6 +45,7 @@ impl Graph {
 /// Each operation occurs at a point in time, but the timestamp is not stored explicitly.  Instead,
 /// nodes in each graph are stored in sequential order, and timing relationships can be identified
 /// by comparing `NodeId`s.
+#[derive(Debug)]
 pub struct Node {
     /// The function that contains this operation.
     ///
@@ -70,6 +72,7 @@ pub struct Node {
     pub source: Option<NodeId>,
 }
 
+#[derive(Debug)]
 pub enum NodeKind {
     /// A copy from one local to another.  This also covers casts such as `&mut T` to `&T` or `&T`
     /// to `*const T` that don't change the type or value of the pointer.
@@ -130,5 +133,11 @@ impl Graphs {
             graphs: IndexVec::new(),
             by_local: HashMap::new(),
         }
+    }
+}
+
+impl Debug for Graphs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.graphs)
     }
 }

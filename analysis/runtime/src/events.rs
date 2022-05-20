@@ -37,6 +37,8 @@ pub enum EventKind {
     /// the pointer.
     Copy(Pointer),
 
+    CopyLocal,
+
     /// Field projection. Used for operations like `_2 = &(*_1).0`. Nested field
     /// accesses like `_4 = &(*_1).x.y.z` are broken into multiple `Node`s, each
     /// covering one level.
@@ -84,6 +86,7 @@ impl fmt::Debug for EventKind {
             EventKind::Done => write!(f, "done"),
             EventKind::LoadAddr(ptr) => write!(f, "load({:p})", ptr as *const u8),
             EventKind::StoreAddr(ptr) => write!(f, "store({:p})", ptr as *const u8),
+            EventKind::CopyLocal => write!(f, "copy_local")
         }
     }
 }

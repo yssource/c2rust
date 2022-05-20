@@ -41,6 +41,7 @@ fn get_ptr(kind: &EventKind) -> Option<&usize> {
         EventKind::Done => return None,
         EventKind::LoadAddr(ptr) => ptr,
         EventKind::StoreAddr(ptr) => ptr,
+        EventKind::CopyLocal => return None,
     })
 }
 
@@ -55,22 +56,21 @@ fn get_new_ptr(kind: &EventKind) -> Option<&usize> {
 }
 
 pub fn event_to_node_kind(event: &Event) -> Option<NodeKind> {
-    match event.kind {
-        EventKind::Alloc { .. } => Some(NodeKind::Malloc(1)),
-        EventKind::Realloc { .. } => Some(NodeKind::Malloc(1)),
-        EventKind::Free { .. } => Some(NodeKind::Free),
-        EventKind::Copy(..) => Some(NodeKind::Copy),
-        EventKind::Field(_, field) => Some(NodeKind::Field(field.into())),
-        EventKind::LoadAddr(..) => Some(NodeKind::LoadAddr),
-        EventKind::StoreAddr(..) => Some(NodeKind::StoreAddr),
-        _ => None,
-    }
+    Some(match event.kind {
+        EventKind::Alloc { .. } => NodeKind::Malloc(1),
+        EventKind::Realloc { .. } => NodeKind::Malloc(1),
+        EventKind::Free { .. } => NodeKind::Free,
+        EventKind::Copy(..) | EventKind::CopyLocal => NodeKind::Copy,
+        EventKind::Field(_, field) => NodeKind::Field(field.into()),
+        EventKind::LoadAddr(..) => NodeKind::LoadAddr,
+        EventKind::StoreAddr(..) => NodeKind::StoreAddr,
+        _ => return None,
+    })
 }
 
 pub fn add_node(
     graphs: &mut Graphs,
-    origins: &mut HashMap<NodeId, GraphId>,
-    provenances: &mut HashMap<usize, NodeId>,
+    provenances: &mut HashMap<usize, (GraphId, NodeId)>,
     event: &Event,
 ) -> Option<NodeId> {
     let node_kind = match event_to_node_kind(event) {
@@ -94,35 +94,26 @@ pub fn add_node(
         block: basic_block_idx.clone().into(),
         index: statement_idx.clone().into(),
         kind: node_kind,
-        source,
+        source: source.map(|(_, nid)| nid),
         dest: store.map(Local::from),
     };
 
-    let node_id = {
-        let graph_id = source.and_then(|source_node_id| {
-            /* search for existing graph */
-            origins.get(&source_node_id).cloned()
-        });
-        let graph_id = graph_id.unwrap_or_else(|| {
-            /* if no existing object, construct new graph */
-            graphs.graphs.push(Graph::new())
-        });
-        graphs.graphs[graph_id].nodes.push(node)
-    };
+    let graph_id = source
+        .map(|(gid, _)| gid)
+        .unwrap_or_else(|| graphs.graphs.push(Graph::new()));
+    let node_id = graphs.graphs[graph_id].nodes.push(node);
 
     if let Some(&ptr) = get_new_ptr(&event.kind) {
-        provenances.insert(ptr, node_id);
+        provenances.insert(ptr, (graph_id, node_id));
     }
     Some(node_id)
 }
 
 pub fn construct_pdg(events: &Vec<Event>) -> Graphs {
     let mut graphs = Graphs::new();
-
-    let mut origins = HashMap::<NodeId, GraphId>::new();
-    let mut provenances = HashMap::<usize, NodeId>::new();
+    let mut provenances = HashMap::<usize, (GraphId, NodeId)>::new();
     for event in events {
-        add_node(&mut graphs, &mut origins, &mut provenances, event);
+        add_node(&mut graphs, &mut provenances, event);
     }
 
     graphs

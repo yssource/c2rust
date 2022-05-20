@@ -30,6 +30,7 @@ pub type size_t = libc::c_ulong;
 #[repr(C)]
 pub struct S {
     pub field: libc::c_int,
+    pub field2: libc::c_ulong,
 }
 #[no_mangle]
 pub static mut global: *mut S = 0 as *const S as *mut S;
@@ -44,6 +45,8 @@ pub unsafe extern "C" fn simple() {
     let y = malloc(mem::size_of::<S>() as c_ulong) as *mut S;
     (*x).field = 10i32;
     (*y).field = (*x).field;
+    (*x).field2 = 9u64;
+    let z = &((*x).field2) as *const libc::c_ulong;
 }
 #[no_mangle]
 pub unsafe extern "C" fn exercise_allocator() {
@@ -142,7 +145,7 @@ pub unsafe extern "C" fn testing() {
     let mut y = 32i32;
     let mut ptr = &mut x as *mut i32;
     let ref mut fresh1 = ptr;
-    *fresh1 = &mut y as *mut i32;
+    *fresh1 = &mut x as *mut i32;
 }
 unsafe fn main_0(mut argc: libc::c_int, mut argv: *mut *mut libc::c_char)
  -> libc::c_int {
@@ -155,11 +158,13 @@ unsafe fn main_0(mut argc: libc::c_int, mut argv: *mut *mut libc::c_char)
     no_owner(1i32);
     invalid();
     testing();
+    simple();
     return 0i32;
 }
 pub fn main() {
     let mut args: Vec<*mut libc::c_char> = Vec::new();
     for arg in ::std::env::args() {
+        println!("{:?}", arg);
         args.push(::std::ffi::CString::new(arg).expect("Failed to convert argument into CString.").into_raw());
     };
     args.push(::std::ptr::null_mut());

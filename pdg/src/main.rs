@@ -50,6 +50,12 @@ fn main() {
     }
 
     let pdg = construct_pdg(&events);
+    for graph in pdg.graphs {
+        for node in graph.nodes {
+            println!("{:?}", node)
+        }
+        println!()
+    }
 
     c2rust_analysis_rt::finalize();
 }
