@@ -57,38 +57,36 @@ impl Into<(u64, u64)> for DefPathHash {
     }
 }
 
+#[derive(Debug, Clone, Copy, Hash, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RefKind {
+    Ref(usize),
+    Raw(usize),
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum EventMetadata {
-    CopyPtr(usize, Option<usize>),
-    CopyRef(usize, usize),
+    CopyPtr(usize, RefKind),
+    CopyRef(usize, RefKind),
     Field(usize),
-    Load(usize),
-    Store(usize, Option<usize>),
     Hook(usize),
-    Arg(usize),
     Generic,
 }
 
 impl EventMetadata {
-    pub fn source(&self) -> Option<usize> {
+    pub fn source(&self) -> Option<RefKind> {
         match &self {
-            EventMetadata::CopyPtr(_dest, src) => *src,
+            EventMetadata::CopyPtr(_dest, src) => Some(*src),
             EventMetadata::CopyRef(_dest, src) => Some(*src),
-            EventMetadata::Load(src) => Some(*src),
-            EventMetadata::Store(_, src) => *src,
-            EventMetadata::Field(src) => Some(*src),
-            EventMetadata::Arg(src) => Some(*src),
-            _ => None,
+            _ => None
         }
     }
 
-    pub fn dest(&self) -> Option<usize> {
+    pub fn dest(&self) -> Option<RefKind> {
         match &self {
-            EventMetadata::CopyPtr(dest, _src) => Some(*dest),
-            EventMetadata::CopyRef(dest, _src) => Some(*dest),
-            EventMetadata::Store(dest, _) => Some(*dest),
-            EventMetadata::Hook(dest) => Some(*dest),
-            _ => None,
+            EventMetadata::CopyPtr(dest, _src) => Some(RefKind::Ref(*dest)),
+            EventMetadata::CopyRef(dest, _src) => Some(RefKind::Ref(*dest)),
+            EventMetadata::Hook(dest) => Some(RefKind::Ref(*dest)),
+            _ => None
         }
     }
 }

@@ -83,6 +83,8 @@ pub enum NodeKind {
     /// Pointer arithmetic.  The `isize` is the concrete offset distance.  We use this to detect
     /// when two pointers always refer to different indices.
     Offset(isize),
+    /// A pointer is used as an argument to a function call
+    Arg,
 
     // Operations that can't have a `source`.
     /// Get the address of a local.  For address-taken locals, the root node is an `AddrOfLocal`
