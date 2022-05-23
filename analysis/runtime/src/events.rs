@@ -1,10 +1,10 @@
+use crate::mir_loc::{self, MirLocId};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use crate::mir_loc::{self, MirLocId};
 
 pub type Pointer = usize;
 
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Event {
     pub mir_loc: MirLocId,
     pub kind: EventKind,
@@ -30,14 +30,14 @@ impl Event {
     }
 }
 
-#[derive(Serialize,Deserialize,Copy,Clone)]
+#[derive(Serialize, Deserialize, Copy, Clone)]
 pub enum EventKind {
     /// A copy from one local to another. This also covers casts such as `&mut
     /// T` to `&T` or `&T` to `*const T` that don't change the type or value of
     /// the pointer.
-    Copy(Pointer),
+    CopyPtr(Pointer),
 
-    CopyLocal,
+    CopyRef,
 
     /// Field projection. Used for operations like `_2 = &(*_1).0`. Nested field
     /// accesses like `_4 = &(*_1).x.y.z` are broken into multiple `Node`s, each
@@ -70,13 +70,17 @@ pub enum EventKind {
 impl fmt::Debug for EventKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            EventKind::Copy(ptr) => write!(f, "copy({:p})", ptr as *const u8),
+            EventKind::CopyPtr(dest) => write!(f, "copy({:p})", dest as *const u8),
             EventKind::Field(ptr, id) => write!(f, "field({:p}, {})", ptr as *const u8, id),
             EventKind::Alloc { size, ptr } => {
                 write!(f, "malloc({}) -> {:p}", size, ptr as *const u8)
             }
             EventKind::Free { ptr } => write!(f, "free({:p})", ptr as *const u8),
-            EventKind::Realloc { old_ptr, size, new_ptr } => write!(
+            EventKind::Realloc {
+                old_ptr,
+                size,
+                new_ptr,
+            } => write!(
                 f,
                 "realloc({:p}, {}) -> {:p}",
                 old_ptr as *const u8, size, new_ptr as *const u8
@@ -86,7 +90,7 @@ impl fmt::Debug for EventKind {
             EventKind::Done => write!(f, "done"),
             EventKind::LoadAddr(ptr) => write!(f, "load({:p})", ptr as *const u8),
             EventKind::StoreAddr(ptr) => write!(f, "store({:p})", ptr as *const u8),
-            EventKind::CopyLocal => write!(f, "copy_local")
+            EventKind::CopyRef => write!(f, "copy_ref"),
         }
     }
 }

@@ -57,15 +57,48 @@ impl Into<(u64, u64)> for DefPathHash {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Copy)]
+pub enum EventMetadata {
+    CopyPtr(usize, Option<usize>),
+    CopyRef(usize, usize),
+    Field(usize),
+    Load(usize),
+    Store(usize, Option<usize>),
+    Hook(usize),
+    Arg(usize),
+    Generic,
+}
+
+impl EventMetadata {
+    pub fn source(&self) -> Option<usize> {
+        match &self {
+            EventMetadata::CopyPtr(_dest, src) => *src,
+            EventMetadata::CopyRef(_dest, src) => Some(*src),
+            EventMetadata::Load(src) => Some(*src),
+            EventMetadata::Store(_, src) => *src,
+            EventMetadata::Field(src) => Some(*src),
+            EventMetadata::Arg(src) => Some(*src),
+            _ => None,
+        }
+    }
+
+    pub fn dest(&self) -> Option<usize> {
+        match &self {
+            EventMetadata::CopyPtr(dest, _src) => Some(*dest),
+            EventMetadata::CopyRef(dest, _src) => Some(*dest),
+            EventMetadata::Store(dest, _) => Some(*dest),
+            EventMetadata::Hook(dest) => Some(*dest),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct MirLoc {
     pub body_def: DefPathHash,
     pub basic_block_idx: usize,
     pub statement_idx: usize,
-    /// The MIR local where this operation stores its result.  This is `None` for operations that
-    /// don't store anything and for operations whose result is a temporary not visible as a MIR
-    /// local.
-    pub store: Option<usize>
+    pub metadata: EventMetadata,
 }
 
 impl fmt::Debug for MirLoc {

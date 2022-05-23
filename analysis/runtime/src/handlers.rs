@@ -56,24 +56,17 @@ pub fn ptr_field(mir_loc: MirLocId, ptr: usize, field_id: u32) {
     }).unwrap();
 }
 
-pub fn ptr_copy(mir_loc: MirLocId, ptr: usize) {
+pub fn ptr_copy(mir_loc: MirLocId, dest_ptr: usize) {
     TX.send(Event {
         mir_loc,
-        kind: EventKind::Copy(ptr as usize),
+        kind: EventKind::CopyPtr(dest_ptr as usize),
     }).unwrap();
 }
 
-pub fn ptr_copy_from_local(mir_loc: MirLocId, ptr: usize, base: u32) {
+pub fn ref_copy(mir_loc: MirLocId) {
     TX.send(Event {
         mir_loc,
-        kind: EventKind::Copy(ptr as usize),
-    }).unwrap();
-}
-
-pub fn ptr_copy_local(mir_loc: MirLocId) {
-    TX.send(Event {
-        mir_loc,
-        kind: EventKind::CopyLocal,
+        kind: EventKind::CopyRef,
     }).unwrap();
 }
 

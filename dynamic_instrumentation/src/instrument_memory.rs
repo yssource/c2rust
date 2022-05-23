@@ -1,4 +1,5 @@
 use anyhow::Context;
+use c2rust_analysis_rt::mir_loc::EventMetadata;
 use c2rust_analysis_rt::HOOK_FUNCTIONS;
 use c2rust_analysis_rt::{Metadata, MirLoc, MirLocId};
 use indexmap::IndexSet;
@@ -9,7 +10,7 @@ use rustc_middle::mir::{
     Mutability, Operand, Place, PlaceElem, PlaceRef, ProjectionElem, Rvalue, SourceInfo, Statement,
     StatementKind, Terminator, TerminatorKind, UserTypeProjection, START_BLOCK,
 };
-use rustc_middle::ty::{self, List, ParamEnv, TyCtxt, Ty};
+use rustc_middle::ty::{self, List, ParamEnv, Ty, TyCtxt};
 use rustc_span::def_id::{DefId, DefPathHash, CRATE_DEF_INDEX};
 use rustc_span::{Symbol, DUMMY_SP};
 use std::cell::RefCell;
@@ -70,17 +71,13 @@ impl InstrumentMemoryOps {
         &self,
         body_def: DefPathHash,
         location: Location,
-        instrumentation_kind: &InstrumentationKind,
+        metadata: &EventMetadata,
     ) -> MirLocId {
-        let store = match instrumentation_kind {
-            InstrumentationKind::Assign(_, local) => Some(local.index()),
-            _ => None,
-        };
         let mir_loc = MirLoc {
             body_def: body_def.0.as_value().into(),
             basic_block_idx: location.block.index(),
             statement_idx: location.statement_index,
-            store,
+            metadata: *metadata,
         };
         let (idx, _) = self.mir_locs.lock().unwrap().insert_full(mir_loc);
         u32::try_from(idx).unwrap()
@@ -93,14 +90,7 @@ struct InstrumentationPoint<'tcx> {
     args: Vec<Operand<'tcx>>,
     is_cleanup: bool,
     after_call: bool,
-    kind: InstrumentationKind,
-}
-
-enum InstrumentationKind {
-    Field(Local, Field),
-    Deref(Local),
-    Assign(Option<Local>, Local),
-    Generic,
+    metadata: EventMetadata,
 }
 
 struct FunctionInstrumenter<'a, 'tcx: 'a> {
@@ -126,7 +116,7 @@ impl<'a, 'tcx: 'a> FunctionInstrumenter<'a, 'tcx> {
         args: Vec<Operand<'tcx>>,
         is_cleanup: bool,
         after_call: bool,
-        kind: InstrumentationKind,
+        metadata: EventMetadata,
     ) {
         self.instrumentation_points
             .borrow_mut()
@@ -136,7 +126,7 @@ impl<'a, 'tcx: 'a> FunctionInstrumenter<'a, 'tcx> {
                 args,
                 is_cleanup,
                 after_call,
-                kind,
+                metadata,
             })
     }
 
@@ -164,7 +154,11 @@ fn ref_place<'tcx>(rv: &'tcx Rvalue) -> Option<Place<'tcx>> {
         Rvalue::AddressOf(_, p) => Some(p.clone()),
         Rvalue::Cast(_, op, _) => op.place(),
         Rvalue::Ref(_, _, p) => Some(p.clone()),
-        _ => return None
+        Rvalue::Use(op) => op.place(),
+        e => {
+            println!("{:?}", e);
+            return None;
+        }
     }
 }
 
@@ -197,7 +191,7 @@ impl<'a, 'tcx: 'a> Visitor<'tcx> for FunctionInstrumenter<'a, 'tcx> {
                         ],
                         false,
                         false,
-                        InstrumentationKind::Field(local, field),
+                        EventMetadata::Field(local.into()),
                     );
                 }
                 PlaceElem::Deref if !context.is_mutating_use() => {
@@ -207,7 +201,7 @@ impl<'a, 'tcx: 'a> Visitor<'tcx> for FunctionInstrumenter<'a, 'tcx> {
                         vec![Operand::Copy(local.into())],
                         false,
                         false,
-                        InstrumentationKind::Deref(local),
+                        EventMetadata::Load(local.into()),
                     );
                 }
                 _ => {}
@@ -225,13 +219,13 @@ impl<'a, 'tcx: 'a> Visitor<'tcx> for FunctionInstrumenter<'a, 'tcx> {
             .find_instrumentation_def(Symbol::intern("ptr_store"))
             .expect("Could not find pointer store hook");
         let copy_local_fn = self
-            .find_instrumentation_def(Symbol::intern("ptr_copy_local"))
+            .find_instrumentation_def(Symbol::intern("ref_copy"))
             .expect("Could not find pointer field hook");
-        
+
         if let StatementKind::Assign(assign) = &statement.kind {
             let mut dest = assign.0;
             let value = &assign.1;
-            let src = ref_place(value).map(|p| {p.local});
+            let src = ref_place(value).map(|p| p.local);
             if dest.is_indirect() {
                 let mut place_ref = dest.as_ref();
                 while let Some((cur_ref, proj)) = place_ref.last_projection() {
@@ -249,42 +243,36 @@ impl<'a, 'tcx: 'a> Visitor<'tcx> for FunctionInstrumenter<'a, 'tcx> {
                     vec![Operand::Copy(dest)],
                     false,
                     false,
-                    InstrumentationKind::Assign(src, dest.local),
+                    EventMetadata::Store(dest.local.into(), src.map(|s| s.index())),
                 );
             } else if value.ty(&self.body.local_decls, self.tcx).is_unsafe_ptr() {
                 // We want to insert after the assignment statement so we can
                 // use the destination local as our instrumentation argument
                 location.statement_index += 1;
-                println!(
-                    "copy raw: {:?} to {:?}",
-                    src,
-                    dest
-                );
+                println!("copy raw: {:?} to {:?}", value, dest);
                 self.add_instrumentation(
                     location,
                     copy_fn,
                     vec![Operand::Copy(dest)],
                     false,
                     false,
-                    InstrumentationKind::Assign(src, dest.local),
+                    EventMetadata::CopyPtr(dest.local.index(), src.map(|s| s.index())),
                 );
             } else if value.ty(&self.body.local_decls, self.tcx).is_ref() {
                 // We want to insert after the assignment statement so we can
                 // use the destination local as our instrumentation argument
-                location.statement_index += 1;
-                println!(
-                    "copy ref: {:?} to {:?}",
-                    src,
-                    dest
-                );
-                self.add_instrumentation(
-                    location,
-                    copy_local_fn,
-                    vec![],
-                    false,
-                    false,
-                    InstrumentationKind::Assign(src, dest.local),
-                );
+                if let Some(src) = src {
+                    location.statement_index += 1;
+                    println!("copy ref: {:?} to {:?}", src, dest);
+                    self.add_instrumentation(
+                        location,
+                        copy_local_fn,
+                        vec![],
+                        false,
+                        false,
+                        EventMetadata::CopyRef(dest.local.index(), src.index()),
+                    );
+                }
             }
         }
 
@@ -301,7 +289,12 @@ impl<'a, 'tcx: 'a> Visitor<'tcx> for FunctionInstrumenter<'a, 'tcx> {
             .expect("Could not find pointer ret hook");
 
         match &terminator.kind {
-            TerminatorKind::Call { func, args, .. } => {
+            TerminatorKind::Call {
+                func,
+                args,
+                destination,
+                ..
+            } => {
                 for arg in args {
                     if let Some(place) = arg.place() {
                         if self.body.local_decls[place.local].ty.is_unsafe_ptr() {
@@ -311,7 +304,7 @@ impl<'a, 'tcx: 'a> Visitor<'tcx> for FunctionInstrumenter<'a, 'tcx> {
                                 vec![Operand::Copy(place)],
                                 false,
                                 false,
-                                InstrumentationKind::Generic,
+                                EventMetadata::Arg(place.local.into()),
                             );
                         }
                     }
@@ -328,7 +321,7 @@ impl<'a, 'tcx: 'a> Visitor<'tcx> for FunctionInstrumenter<'a, 'tcx> {
                             args.clone(),
                             false,
                             true,
-                            InstrumentationKind::Generic,
+                            EventMetadata::Hook(destination.unwrap().0.local.into()),
                         );
                     }
                 }
@@ -342,7 +335,7 @@ impl<'a, 'tcx: 'a> Visitor<'tcx> for FunctionInstrumenter<'a, 'tcx> {
                         vec![Operand::Copy(place)],
                         false,
                         false,
-                        InstrumentationKind::Generic,
+                        EventMetadata::Generic,
                     );
                 }
             }
@@ -463,12 +456,12 @@ fn do_instrumentation<'tcx>(
             ref args,
             is_cleanup,
             after_call,
-            ref kind,
+            ref metadata,
         } = point;
         let mut args = args.clone();
 
         // Add the MIR location as the first argument to the instrumentation function
-        let loc_idx = state.get_mir_loc_idx(body_def, loc, kind);
+        let loc_idx = state.get_mir_loc_idx(body_def, loc, metadata);
         args.insert(0, make_const(tcx, loc_idx));
 
         let (blocks, locals) = body.basic_blocks_and_local_decls_mut();

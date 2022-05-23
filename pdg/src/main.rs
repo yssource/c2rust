@@ -40,12 +40,7 @@ fn main() {
     let events = read_event_log(EVENT_TRACE_FILE_PATH.to_string());
 
     for event in &events {
-        let mir_loc @ MirLoc {
-            body_def,
-            basic_block_idx,
-            statement_idx,
-            store
-        } = mir_loc::get(event.mir_loc).unwrap();
+        let mir_loc = mir_loc::get(event.mir_loc).unwrap();
         println!("{:?} -> {:?}", mir_loc, event.kind);
     }
 
